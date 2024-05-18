@@ -22,60 +22,159 @@ def calculate_total_payload(passenger_count, cargo_weight):
   total_payload = passenger_weight + cargo_weight
   return total_payload
 
+# Get weight factor
+def weight_factor(actual_landingweight,MLW):
+  #actual landing weight/ max landing weight
+  # should work for take off too
+  wf = actual_landingweight / MLW
+  return wf
+
+#Determine new ac weight
+def new_ac_weight(wf,MW):
+  new_weight = wf * MW
+  return new_weight
+
+# Get adjusted number for runway use
+def adjusted_runway_use(wf,max_rwny):
+  # weight factor time max distance
+  adjusted_runway_length = wf * max_rwny
+  return adjusted_runway_length
+
+# Now get how much we need to change weight factor
+def reverse_adjusted_runway_use(airport_runway_length,Min_LND_length_MLW):
+  wf = airport_runway_length / Min_LND_length_MLW
+  return wf
+
+#Function to determine drop weight from the aircraft 
+def weight_reduction(diff,Maxpax,Maxcargo,passenger_baggage_weight):
+  cargo_only = Maxcargo - passenger_baggage_weight
+  new_cargo = cargo_only
+  New_Maxpax = Maxpax
+  while new_cargo > 0 or diff > 0:
+    new_cargo = new_cargo - 1
+    diff = diff - 1
+  if diff > 0:
+    while diff > 0 or New_Maxpax > 0 :
+      New_Maxpax = New_Maxpax - 300
+      diff = diff - 300
+  if New_Maxpax < 0:
+    possible = False
+  return New_Maxpax, new_cargo, possible
+
+
+
+# Function to modify aircraft performance so that it can take off or land at a specific airport
+def calculate_performance(aircraft,airport_runway_length,trip_fuel,cominggoing):
+    # Constants
+    average_passenger_weight = 195
+    baggage_weight = 100
+    jet_fuel_weight_per_gallon = 7
+    MTOW = aircraft['MTOW']
+    maxlw = aircraft['MLW']
+    Maxpax = aircraft['Passenger Numbers']
+    Maxcargo = aircraft['Cargo']
+    fuel_burn = aircraft['Fuel Burn per Hour']
+    Min_TO_length_MTOW = aircraft['TO Distance MTOW']
+    Min_LND_length_MLW = aircraft['Lnd Distance MLW']
+    MIN_LAND_DISTANCE = aircraft['min LND Distance']
+    MAX_LAND_WEIGHT = aircraft['MLW']
+    maxpaxweight = Maxpax * average_passenger_weight
+    total_fuel_weight = trip_fuel * jet_fuel_weight_per_gallon
+    empty_weight = MTOW - total_fuel_weight - Maxcargo - maxpaxweight
+    min_landing_weight_legal = empty_weight + fuel_burn
+    difference = min_landing_weight_legal - MAX_LAND_WEIGHT
+    reserve_fuel_weight = fuel_burn * jet_fuel_weight_per_gallon
+    passenger_baggage_weight = Maxpax * 100
+
+    takeoffweight = Maxpax + Maxcargo + total_fuel_weight
+    landing_weight = takeoffweight - total_fuel_weight + reserve_fuel_weight
+
+    if cominggoing == 'TO':
+      wf = weight_factor(takeoffweight,MTOW)  
+      adjusted_runway_length = adjusted_runway_use(wf,Min_TO_length_MTOW)
+    else: 
+      wf = weight_factor(landing_weight,MAX_LAND_WEIGHT)  
+      adjusted_runway_length = adjusted_runway_use(wf,Min_LND_length_MLW)
+    
+    if adjusted_runway_length > airport_runway_length:
+      if cominggoing == 'LND':
+        wf = reverse_adjusted_runway_use(airport_runway_length,Min_LND_length_MLW)
+        new_weight = new_ac_weight(wf,MAX_LAND_WEIGHT)
+        diff = landing_weight - new_weight 
+        new_pax, new_cargo, possible = weight_reduction(diff,Maxpax,Maxcargo)
+      else:   
+        wf = reverse_adjusted_runway_use(airport_runway_length,Min_TO_length_MTOW)
+        new_weight = new_ac_weight(wf,MTOW)
+        diff = takeoffweight - new_weight 
+        new_pax, new_cargo, possible = weight_reduction(diff,Maxpax,Maxcargo,passenger_baggage_weight)
+    if possible == True:    
+      return True, new_pax, new_cargo
+    else:
+      return False, 0, 0
+    
+# Calculate Range performance
+def calculate_range_performance(aircraft, distance,usable_range):
+  MTOW = aircraft['MTOW']
+  max_range = aircraft['Range']
+  paxweight = aircraft['Passenger Numbers'] * 300
+  cargoweight = aircraft['Cargo']
+  Max_pax_weight = aircraft['Passenger Numbers'] * 190
+  passenger_baggage_weight = aircraft['Passenger Numbers'] * 100
+  jet_fuel_weight_per_gallon = 7
+  fuel_avail = calculate_reserve_fuel(aircraft["Fuel Burn"], aircraft["Range"])
+  fuel_weight = fuel_avail * jet_fuel_weight_per_gallon
+  toweight = fuel_weight + paxweight + cargoweight
+  wf = weight_factor(MTOW,toweight)
+  adjusted_range = adjusted_runway_use(wf,max_range)
+  if adjusted_range < distance:
+    wf = reverse_adjusted_runway_use(adjusted_range,distance)
+    new_weight = new_ac_weight(wf,MTOW)
+    diff = MTOW - new_weight
+    new_pax, new_cargo, possible = weight_reduction(diff,Max_pax_weight,cargoweight,passenger_baggage_weight)
+    if possible == True:
+      return True, new_pax, new_cargo 
+    else:
+      return False, 0, 0
+
+
 # Function to evaluate aircraft suitability
-def evaluate_aircraft(aircraft, distance, runway_length):
+def evaluate_aircraft(aircraft, distance, departing_runway_length, landing_runway_length):
   # Calculate usable range after reserve fuel
   usable_range = aircraft["Range"] - calculate_reserve_fuel(aircraft["Fuel Burn"], aircraft["Range"])
-  
+  old_pax = aircraft['Passenger Numbers']
+  old_cargo = aircraft['Cargo']
+
   # Check if aircraft range is sufficient for the trip
   if usable_range < distance:
-    return None  # Skip if range is insufficient
-
-  # Check runway length for takeoff and landing
-  if runway_length < aircraft["Takeoff Distance (MTOW)"]:
-    # Minimum landing distance might be the limiting factor
-    if runway_length >= aircraft["Minimum Landing Distance"]:
-      # Calculate required fuel for the trip
-      trip_fuel = calculate_trip_fuel(distance, aircraft["Fuel Burn"], calculate_reserve_fuel(aircraft["Fuel Burn"], aircraft["Range"]))
-
-      # Calculate remaining payload capacity after fuel
-      payload_capacity = aircraft["MTOW"] - trip_fuel - aircraft["Minimum Landing Weight"]
-
-      # Remove cargo first, then passengers (with their baggage)
-      cargo_reduction = min(aircraft["Cargo"], payload_capacity - calculate_total_payload(aircraft["Passenger Count"], 0))
-      remaining_cargo = aircraft["Cargo"] - cargo_reduction
-
-      # If cargo reduction isn't enough, remove passengers
-      passenger_reduction = 0
-      if payload_capacity - calculate_total_payload(aircraft["Passenger Count"] - 1, remaining_cargo) < 0:
-        passengers_to_remove = int((payload_capacity - calculate_total_payload(0, remaining_cargo)) / (calculate_passenger_weight(1) + 2 * 50))  # Account for baggage
-        passenger_reduction = min(aircraft["Passenger Count"], passengers_to_remove)
-        remaining_passengers = aircraft["Passenger Count"] - passenger_reduction
-
-      # Update payload information if restrictions are needed
-      if cargo_reduction > 0 or passenger_reduction > 0:
-        return {
-          "Model": aircraft["Model"],
-          "Performance Score": None,  # Performance score not calculated due to restrictions
-          "Cargo Restriction": cargo_reduction,
-          "Passenger Restriction": passenger_reduction,
-          "Remaining Cargo": remaining_cargo,
-          "Remaining Passengers": remaining_passengers
-        }
+    achievable,new_pax, new_cargo = calculate_range_performance(aircraft, distance,usable_range)
+    if achievable != True:
+      return None  # Skip if range is insufficient
     else:
+      reserve_fuel = calculate_reserve_fuel(aircraft["fuel_burn"], usable_range)
+      trip_fuel = calculate_trip_fuel(distance, aircraft["fuel_burn"], reserve_fuel)
+      aircraft['Passenger Numbers'] = new_pax
+      aircraft['Cargo'] = new_cargo
+
+  # Check runway length for takeoff
+  if departing_runway_length < aircraft["Takeoff Distance (MTOW)"]:
+    achievable, new_pax, new_cargo = calculate_performance(aircraft,departing_runway_length,trip_fuel,'TO')
+    if achievable == False:
+      return None # Skip if runway is too short for take off
+    else:
+      aircraft['Passenger Numbers'] = new_pax
+      aircraft['Cargo'] = new_cargo
+    
+  # Minimum landing distance might be the limiting factor
+  if runway_length < aircraft["Minimum Landing Distance"]:
+    achievable, new_pax, new_cargo = calculate_performance(aircraft,departing_runway_length,trip_fuel,'LND')
+    if achievable == False:
       return None  # Skip if runway is too short for landing
-
-
-  # Calculate remaining payload capacity after fuel
-  payload_capacity = aircraft["MTOW"] - trip_fuel - aircraft["Minimum Landing Weight"]
-
-  # Check if payload capacity is enough for passengers and cargo
-  total_payload = calculate_total_payload(aircraft["Passenger Count"], aircraft["Cargo"])
-  if payload_capacity < total_payload:
-    return None  # Skip if payload is too heavy
+    else:
+      aircraft['Passenger Numbers'] = new_pax
+      aircraft['Cargo'] = new_cargo
 
   # Calculate performance score (higher is better)
-  performance_score = aircraft["Passenger Count"] * (usable_range / trip_fuel)
+  performance_score = (1-(aircraft["Passenger Numbers"]/old_pax) * ((usable_range / trip_fuel)/100)*(aircraft['Cargo']/old_cargo))*100
   return {"Model": aircraft["Model"], "Performance Score": performance_score}
 
 # Load aircraft data from a DataFrame

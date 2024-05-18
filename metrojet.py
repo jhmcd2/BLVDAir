@@ -6,7 +6,10 @@ airports = ['KALB','KATL','KBWI','KBHM','KBOS','KBUF','KMDW','KCLE','KCMH','KFLL
 hub = ['KBWI']
 
 print(airports)
-
+def Metrojet_airports():
+    airports = ['KALB','KATL','KBWI','KBHM','KBOS','KBUF','KMDW','KCLE','KCMH','KFLL','KRSW','KBDL','KJAX','KMHT','KMIA','KMKE','KMSY','KLGA','KMCO','KPVD','KRDU','KSTL','KSYR','KTPA','KTUS','KIAD','KPBI' ]
+    hub = ['KBWI']
+    return hub, airports
 
 def make_metrojet_routes(AIRPORTSDF):
     hub = hub[0]
@@ -17,6 +20,7 @@ def make_metrojet_routes(AIRPORTSDF):
             airportdf = AIRPORTSDF[AIRPORTSDF['ICAO Code']== airport]
             airlat = airportdf['Lat'].iloc[0]
             airlong = airportdf['Long'].iloc[0]
+
             if how_many_routes != 0:
                 hubdf = AIRPORTSDF[AIRPORTSDF['ICAO Code']== hub]
                 hublat = hubdf['Lat'].iloc[0]
